@@ -25,10 +25,8 @@ from transformers.modeling_outputs import (
     CausalLMOutputWithCrossAttentions,
     MaskedLMOutput
 )
-from transformers.modeling_utils import (
-    PreTrainedModel,
-    apply_chunking_to_forward,
-)
+from transformers.modeling_utils import PreTrainedModel
+from transformers.pytorch_utils import apply_chunking_to_forward
 from transformers.utils import logging
 from transformers.models.bert.configuration_bert import BertConfig
 

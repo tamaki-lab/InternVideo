@@ -40,10 +40,18 @@ from transformers.modeling_outputs import (
     MultipleChoiceModelOutput, NextSentencePredictorOutput,
     QuestionAnsweringModelOutput, SequenceClassifierOutput,
     TokenClassifierOutput)
-from transformers.modeling_utils import (PreTrainedModel,
-                                         apply_chunking_to_forward,
-                                         find_pruneable_heads_and_indices,
-                                         prune_linear_layer)
+from transformers.modeling_utils import PreTrainedModel
+from transformers.pytorch_utils import apply_chunking_to_forward, prune_linear_layer
+
+def find_pruneable_heads_and_indices(heads, n_heads, head_size, already_pruned_heads):
+    mask = torch.ones(n_heads, head_size)
+    heads = set(heads) - already_pruned_heads
+    for head in heads:
+        head = head - sum(1 if h < head else 0 for h in already_pruned_heads)
+        mask[head] = 0
+    mask = mask.view(-1).contiguous().eq(1)
+    index = torch.arange(len(mask))[mask].long()
+    return heads, index
 from transformers.utils import logging
 
 transformers.logging.set_verbosity_error()
@@ -311,14 +319,15 @@ class BertEmbeddings(nn.Module):
         seq_length = input_shape[1]
 
         if position_ids is None:
-            position_ids = self.position_ids[
-                :, past_key_values_length : seq_length + past_key_values_length
-            ]
+            device = input_ids.device if input_ids is not None else inputs_embeds.device
+            position_ids = torch.arange(
+                past_key_values_length, seq_length + past_key_values_length,
+                dtype=torch.long, device=device
+            ).unsqueeze(0)
 
         if token_type_ids is None:
-            token_type_ids = torch.zeros(
-                input_shape, dtype=torch.long, device=self.position_ids.device
-            )
+            device = input_ids.device if input_ids is not None else inputs_embeds.device
+            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
 
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
@@ -1020,6 +1029,16 @@ class BertModel(BertPreTrainedModel):
     input to the forward pass.
     """
 
+    def get_head_mask(self, head_mask, num_hidden_layers):
+        if head_mask is None:
+            return [None] * num_hidden_layers
+        if head_mask.dim() == 1:
+            head_mask = head_mask.unsqueeze(0).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+            head_mask = head_mask.expand(num_hidden_layers, -1, -1, -1, -1)
+        elif head_mask.dim() == 2:
+            head_mask = head_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)
+        return [head_mask[i] for i in range(num_hidden_layers)]
+
     def __init__(self, config, add_pooling_layer=True):
         super().__init__(config)
         self.config = config
@@ -1593,6 +1612,8 @@ class BertForMaskedLM(BertPreTrainedModel):
 
     _keys_to_ignore_on_load_unexpected = [r"pooler"]
     _keys_to_ignore_on_load_missing = [r"position_ids", r"predictions.decoder.bias"]
+    _tied_weights_keys = ["predictions.decoder.weight", "predictions.decoder.bias"]
+    all_tied_weights_keys = {}
 
     def __init__(self, config):
         super().__init__(config)

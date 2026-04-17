@@ -159,3 +159,6 @@ work_dir/
 batchscript-*
 phoenix-slurm-*
 wandb
+
+# pretrained model weights
+InternVideo2/pretrained_weights/
